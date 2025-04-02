@@ -23,7 +23,7 @@ const ConvertButton: React.FC<ConvertButtonProps> = ({
       {isConverting ? (
         <div className="flex items-center gap-2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></div>
-          <span>Converting...</span>
+          <span>Processing...</span>
         </div>
       ) : (
         <div className="flex items-center justify-center gap-2">
