@@ -1,6 +1,7 @@
 
 import { ConversionSettingsType } from "@/components/ConversionSettings";
 import { toast } from "sonner";
+import GIF from "gif.js";
 
 export async function convertVideoToGif(
   videoFile: File,
@@ -30,79 +31,76 @@ export async function convertVideoToGif(
       canvas.width = settings.width;
       canvas.height = Math.floor(settings.width * aspectRatio);
 
-      // Calculate frame interval
-      const frameInterval = 1000 / settings.fps;
+      // Calculate total frames needed
       const gifDuration = settings.endTime - settings.startTime;
       const totalFrames = Math.floor(gifDuration * settings.fps);
 
-      // Use a lighter GIF library for browser
+      // Create a new GIF
+      const gif = new GIF({
+        workers: 2,
+        quality: 101 - settings.quality, // Convert quality (higher is better) to GIF.js quality (lower is better)
+        width: canvas.width,
+        height: canvas.height,
+        workerScript: 'https://cdn.jsdelivr.net/npm/gif.js/dist/gif.worker.js', // Use CDN for worker
+      });
+
       let frameCount = 0;
-      const frames: ImageData[] = [];
       
       // Progress tracking
-      const updateProgress = (progress: number) => {
+      gif.on('progress', (progress) => {
+        const percent = Math.round(progress * 100);
         toast.dismiss("gif-progress");
-        toast(`Converting: ${progress}% complete`, {
+        toast(`Converting: ${percent}% complete`, {
           id: "gif-progress",
         });
-      };
-      
+      });
+
+      // When GIF is finished
+      gif.on('finished', (blob) => {
+        toast.dismiss("gif-progress");
+        // Create URL from blob
+        const gifUrl = URL.createObjectURL(blob);
+        resolve(gifUrl);
+      });
+
       // Show initial progress
-      updateProgress(0);
+      toast(`Starting conversion...`, {
+        id: "gif-progress",
+      });
       
       // We need to seek to the start time first
       video.currentTime = settings.startTime;
       
-      // Handle seeking completion
-      video.onseeked = () => {
-        // Start capturing frames
-        captureFrames();
-      };
-      
-      // Function to capture all frames
-      const captureFrames = () => {
+      // Handle seeking completion for the first frame
+      video.onseeked = function captureFrame() {
         // Draw current frame
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        
+        // Add the frame to the GIF
+        gif.addFrame(ctx, { copy: true, delay: 1000 / settings.fps });
         frameCount++;
         
-        // Update progress
-        const progress = Math.min(100, Math.floor((frameCount / totalFrames) * 100));
+        // Update progress for frame capture
+        const captureProgress = Math.min(100, Math.floor((frameCount / totalFrames) * 100));
         if (frameCount % 5 === 0) {
-          updateProgress(progress);
+          toast.dismiss("gif-progress");
+          toast(`Capturing frames: ${captureProgress}% complete`, {
+            id: "gif-progress",
+          });
         }
         
         // Check if we're done or need to capture more frames
         if (video.currentTime >= settings.endTime || frameCount >= totalFrames) {
-          // Conversion complete
-          finishConversion();
+          // Finish GIF creation
+          video.pause();
+          URL.revokeObjectURL(videoUrl);
+          gif.render(); // This will trigger the 'finished' event when done
           return;
         }
         
         // Move to next frame
         video.currentTime += 1 / settings.fps;
-        // Wait for seeking to complete before capturing next frame
-      };
-      
-      // Function to finish conversion
-      const finishConversion = () => {
-        // Clean up
-        video.pause();
-        URL.revokeObjectURL(videoUrl);
-        
-        // Complete the conversion
-        updateProgress(100);
-        
-        // In a real implementation, we'd use a proper GIF encoder
-        // For now, create a data URL from the canvas with the last frame
-        ctx.putImageData(frames[frames.length - 1], 0, 0);
-        const gifUrl = canvas.toDataURL("image/png");
-        
-        // Resolve with the gif URL
-        setTimeout(() => {
-          toast.dismiss("gif-progress");
-          resolve(gifUrl);
-        }, 500);
+        // The onseeked event will trigger again for the next frame
       };
     };
 
